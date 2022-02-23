@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import os
-import time
+from time import time
 
 import numpy as np
 import cv2
@@ -67,6 +67,7 @@ class yolov4(object):
             "detections", Detector2DArray, queue_size=1)
         self.overlay_pub = rospy.Publisher(
             "/result/overlay", Image, queue_size=1)
+        self.frame_counter = 0
 
     def init_yolo(self):
         """ Initialises yolo parameters required for trt engine """
@@ -93,17 +94,23 @@ class yolov4(object):
     def img_callback(self, ros_img):
         """Continuously capture images from camera and do object detection """
 
-        tic = time.time()
-
         # converts from ros_img to cv_img for processing
         cv_img = np.frombuffer(ros_img.data, dtype=np.uint8).reshape(ros_img.height, ros_img.width, -1)
 
         if cv_img is not None:
-            boxes, confs, clss = self.trt_yolo.detect(cv_img, self.conf_th)
+            img_preprocessed = self.trt_yolo.preprocess_yolo(cv_img, self.trt_yolo.input_shape)
+            
+            # MEASURE DETECTION TIME
+            start_time = time()
+            boxes, confs, clss = self.trt_yolo.detect(img_preprocessed, (cv_img.shape[0], cv_img.shape[1]), self.conf_th)
+            detection_time = round((time() - start_time) * 1000, 5)
 
             cv_img = self.vis.draw_bboxes(cv_img, boxes, confs, clss)
-            toc = time.time()
-            fps = 1.0 / (toc - tic)
+            
+            self.frame_counter += 1
+            fps = 1.0 / detection_time
+            
+            print(f'FRAME: {self.frame_counter}, {detection_time} ms')
 
             self.publisher(boxes, confs, clss)
 

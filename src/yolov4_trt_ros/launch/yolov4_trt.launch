@@ -10,6 +10,7 @@
 		<param name="confidence_threshold" type="double" value="0.5" />
 		<param name="log_time" type="bool" value="True" />
 		<param name="save_frames" type="bool" value="True" />
+		<param name="save_lidar" type="bool" value="True" />
 		<param name="show_image" type="bool" value="True" />
 	</node>
 </launch>

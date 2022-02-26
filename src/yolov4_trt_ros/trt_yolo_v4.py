@@ -8,6 +8,7 @@ import cv2
 import pycuda.autoinit  # For initializing CUDA driver
 import pycuda.driver as cuda
 
+from lidar_data_writer import LidarDataWriter
 from utils.yolo_classes import get_cls_dict
 from utils.display import open_window, set_display, show_fps
 from utils.visualization import BBoxVisualization
@@ -21,7 +22,6 @@ from yolov4_trt_ros.msg import Detector2D
 from vision_msgs.msg import BoundingBox2D
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import PointCloud2
-import sensor_msgs.point_cloud2 as pc2
 
 
 class yolov4(object):
@@ -55,36 +55,47 @@ class yolov4(object):
         
         rospack = rospkg.RosPack()
         package_path = rospack.get_path("yolov4_trt_ros")
+
         self.video_topic = rospy.get_param("/video_topic", "/zed/zed_node/rgb_raw/image_raw_color")
         self.lidar_topic = rospy.get_param("/lidar_topic", "/velodyne_points")
         self.model = rospy.get_param("/model", "yolov4-416")
-        self.model_path = rospy.get_param(
-            "/model_path", package_path + "/yolo/")
+        self.model_path = rospy.get_param("/model_path", package_path + "/yolo/")
         self.category_num = rospy.get_param("/category_number", 5)
         self.input_shape = rospy.get_param("/input_shape", "416")
         self.conf_th = rospy.get_param("/confidence_threshold", 0.5)
         self.show_img = rospy.get_param("/show_image", True)
-        
+
         self.image_sub = message_filters.Subscriber(self.video_topic, Image, queue_size=1, buff_size=1920*1080*3)
         self.lidar_sub = message_filters.Subscriber('/velodyne_points', PointCloud2, queue_size=1)
         print('Starting...')
 
         # slop - delay in seconds with which the messages can be synchronized
-        synchronized_sub = message_filters.ApproximateTimeSynchronizer([image_sub, lidar_sub], queue_size=1,
+        synchronized_sub = message_filters.ApproximateTimeSynchronizer([self.image_sub, self.lidar_sub], queue_size=1,
                                                                 slop=0.001, allow_headerless=True)
         # Callback function
-        synchronized_sub.registerCallback(callback, args)
+        synchronized_sub.registerCallback(callback  )
 
         # Logging and saving
         self.log_time = rospy.get_param("/log_time", True)
         self.save_frames = rospy.get_param("/save_frames", True)
+        self.save_lidar = rospy.get_param("/save_lidar", True)
+        self.log_dir = 'log/'
+        self.frame_counter = 0
+        
+        if not os.path.exists(self.log_dir()):
+            os.makedirs(self.log_dir)
 
         if self.log_time:
-            self.frame_counter = 0
-            self.log_dir = 'log/'
-            if not os.path.existsself.log_dir():
-                os.makedirs(self.log_dir)
             self.log_file_path = os.path.join(self.log_dir, 'detection_times.log')
+
+        if self.save_frames:
+            self.log_camera_dir = os.path.join(self.log_dir)
+
+        if self.save_lidar:
+            self.log_lidar_dir = os.path.join(self.log_dir, 'lidar')
+            if not os.path.exists(self.log_lidar_dir):
+                os.makedirs(self.log_lidar_dir)
+            self.lidar_data_writer = LidarDataWriter(self.log_lidar_dir)
 
         # Publishers
         self.detection_pub = rospy.Publisher(
@@ -115,7 +126,7 @@ class yolov4(object):
         self.vis = BBoxVisualization(cls_dict)
 
 
-    def callback(self, ros_img):
+    def callback(self, ros_img, lidar_data):
         """Continuously capture images from camera and do object detection """
 
         # converts from ros_img to cv_img for processing
@@ -145,12 +156,13 @@ class yolov4(object):
             self.publisher(boxes, confs, clss)
 
             if self.save_frames:
-                # call save_camera_data
-                img_filename = f'frame_{frame_counter}'
-                cv2.imwrite(os.path.join(self.log_dir, img_filename))
+                img_filename = f'frame_{self.frame_counter}.jpg'
+                cv2.imwrite(os.path.join(self.log_camera_dir, img_filename))
 
-            # if self.save_lidar:
-                # call save_lidar_data
+            if self.save_lidar:
+                preprocessed_lidar_data = self.lidar_data_writer.preprocess(lidar_data)
+                lidar_filename = f'lidar_{self.frame_counter}.bin'
+                self.lidar_data_writer.save_data(preprocessed_lidar_data, os.path.join(self.log_lidar_dir, lidar_filename))
 
             if self.show_img:
                 cv_img = show_fps(cv_img, fps)

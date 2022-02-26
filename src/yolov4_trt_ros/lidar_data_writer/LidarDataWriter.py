@@ -6,14 +6,13 @@ import os
 
 from typing import Union, Callable
 import numpy as np
+import sensor_msgs.point_cloud2 as pc2
 
 
 class LidarDataWriter:
     """Saves lidar data in a given format."""
     def __init__(self, saving_dir: Union[str, os.PathLike],
-                 dir_number: int = 0,
                  dtype: str = 'float32',
-                 data_extension: str = '.bin',
                  preprocess_func: Callable = None) -> None:
         """Initializes Lidar Data Writer class.
 
@@ -21,38 +20,34 @@ class LidarDataWriter:
         ----------
         saving_dir -- directory for saving the data
 
-        dir_number -- directory number
-            default = 0
-
         dtype -- output datatype
             default = 'float32'
-
-        data_extension -- file extension
-            default = '.bin'
 
         preprocess_func -- function for preprocessing lidar data before saving
             default = None
         """
-        self.saving_dir = saving_dir
-        self.samples_saved = 0
-        self.dir_number = dir_number
         try:
             np.dtype(dtype)
             self.dtype = dtype
         except TypeError:
             raise TypeError('Incorrect dtype for numpy array')
-        self.data_extension = data_extension
+        self.saving_dir = saving_dir
         self.preprocess_func = preprocess_func
 
-    def _create_filename(self) -> str:
-        """Creates a filename for a data sample by concatena"""
-        return '_'.join((str(self.dir_number), str(self.samples_saved), str(self.data_extension)))
+    def preprocess(lidar_data):
+        x = np.array(list(pc2.read_points(lidar_data, skip_nans=True, field_names="x")))
+        y = np.array(list(pc2.read_points(lidar_data, skip_nans=True, field_names="y")))
+        z = np.array(list(pc2.read_points(lidar_data, skip_nans=True, field_names="z")))
+        p = np.array(list(pc2.read_points(lidar_data, skip_nans=True, field_names="intensity")))[:, 0]
 
-    def _create_saving_path(self, filename: Union[str, os.PathLike]) -> str:
-        """Concatenates the saving dir path and the filename for a data sample."""
-        return os.path.join(self.saving_dir, filename)
+        points_array = np.zeros(x.shape[0] + y.shape[0] + z.shape[0] + p.shape[0], dtype=np.float32)
+        points_array[::4] = np.squeeze(x)
+        points_array[1::4] = np.squeeze(y)
+        points_array[2::4] = np.squeeze(z)
+        points_array[3::4] = p
+        return points_array
 
-    def save_data(self, data: np.ndarray) -> None:
+    def save_data(self, data: np.ndarray, saving_path: str) -> None:
         """Saves lidar data to previously specified directory.
 
         Parameters
@@ -65,9 +60,6 @@ class LidarDataWriter:
         """
         if not isinstance(data, np.ndarray):
             data = np.array(data)
-
-        filename = self._create_filename()
-        saving_path = self._create_saving_path(filename)
 
         if self.preprocess_func is not None:
             data = self.preprocess_func(data)

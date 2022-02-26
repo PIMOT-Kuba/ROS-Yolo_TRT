@@ -35,7 +35,7 @@ class yolov4(object):
 
     def __del__(self):
         """ Destructor """
-
+        
         self.cuda_ctx.pop()
         del self.trt_yolo
         del self.cuda_ctx
@@ -67,7 +67,16 @@ class yolov4(object):
             "detections", Detector2DArray, queue_size=1)
         self.overlay_pub = rospy.Publisher(
             "/result/overlay", Image, queue_size=1)
-        self.frame_counter = 0
+        self.log_time = rospy.get_param("/log_time", True)
+        self.save_frames = rospy.get_param("/save_frames", True)
+
+        if self.log_time:
+            self.frame_counter = 0
+            self.log_dir = 'log/'
+            if not os.path.existsself.log_dir():
+                os.makedirs(self.log_dir)
+            self.log_file_path = os.path.join(self.log_dir, 'detection_times.log')
+
 
     def init_yolo(self):
         """ Initialises yolo parameters required for trt engine """
@@ -107,12 +116,22 @@ class yolov4(object):
 
             cv_img = self.vis.draw_bboxes(cv_img, boxes, confs, clss)
             
-            self.frame_counter += 1
             fps = 1.0 / detection_time
-            
-            print(f'FRAME: {self.frame_counter}, {detection_time} ms')
+
+            if self.log_time:
+                self.frame_counter += 1
+                text_info = f'FRAME: {self.frame_counter}, {detection_time} ms\n'
+                print(text_info)
+
+                self.file_handler = open(self.log_file_path, 'a')
+                self.file_handler.write(text_info)
+                self.file_handler.close()
 
             self.publisher(boxes, confs, clss)
+
+            if self.save_frames:
+                img_filename = f'frame_{frame_counter}'
+                cv2.imwrite(os.path.join(self.log_dir, img_filename))
 
             if self.show_img:
                 cv_img = show_fps(cv_img, fps)

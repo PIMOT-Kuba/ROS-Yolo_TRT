@@ -15,13 +15,10 @@ from utils.yolo_with_plugins import TrtYOLO
 
 import rospy
 import rospkg
-import message_filters
 from yolov4_trt_ros.msg import Detector2DArray
 from yolov4_trt_ros.msg import Detector2D
 from vision_msgs.msg import BoundingBox2D
 from sensor_msgs.msg import Image
-from sensor_msgs.msg import PointCloud2
-import sensor_msgs.point_cloud2 as pc2
 
 
 class yolov4(object):
@@ -56,7 +53,6 @@ class yolov4(object):
         rospack = rospkg.RosPack()
         package_path = rospack.get_path("yolov4_trt_ros")
         self.video_topic = rospy.get_param("/video_topic", "/zed/zed_node/rgb_raw/image_raw_color")
-        self.lidar_topic = rospy.get_param("/lidar_topic", "/velodyne_points")
         self.model = rospy.get_param("/model", "yolov4-416")
         self.model_path = rospy.get_param(
             "/model_path", package_path + "/yolo/")
@@ -64,18 +60,12 @@ class yolov4(object):
         self.input_shape = rospy.get_param("/input_shape", "416")
         self.conf_th = rospy.get_param("/confidence_threshold", 0.5)
         self.show_img = rospy.get_param("/show_image", True)
-        
-        self.image_sub = message_filters.Subscriber(self.video_topic, Image, queue_size=1, buff_size=1920*1080*3)
-        self.lidar_sub = message_filters.Subscriber('/velodyne_points', PointCloud2, queue_size=1)
-        print('Starting...')
-
-        # slop - delay in seconds with which the messages can be synchronized
-        synchronized_sub = message_filters.ApproximateTimeSynchronizer([image_sub, lidar_sub], queue_size=1,
-                                                                slop=0.001, allow_headerless=True)
-        # Callback function
-        synchronized_sub.registerCallback(callback, args)
-
-        # Logging and saving
+        self.image_sub = rospy.Subscriber(
+            self.video_topic, Image, self.img_callback, queue_size=1, buff_size=1920*1080*3)
+        self.detection_pub = rospy.Publisher(
+            "detections", Detector2DArray, queue_size=1)
+        self.overlay_pub = rospy.Publisher(
+            "/result/overlay", Image, queue_size=1)
         self.log_time = rospy.get_param("/log_time", True)
         self.save_frames = rospy.get_param("/save_frames", True)
 
@@ -85,12 +75,6 @@ class yolov4(object):
             if not os.path.existsself.log_dir():
                 os.makedirs(self.log_dir)
             self.log_file_path = os.path.join(self.log_dir, 'detection_times.log')
-
-        # Publishers
-        self.detection_pub = rospy.Publisher(
-            "detections", Detector2DArray, queue_size=1)
-        self.overlay_pub = rospy.Publisher(
-            "/result/overlay", Image, queue_size=1)
 
 
     def init_yolo(self):
@@ -115,7 +99,7 @@ class yolov4(object):
         self.vis = BBoxVisualization(cls_dict)
 
 
-    def callback(self, ros_img):
+    def img_callback(self, ros_img):
         """Continuously capture images from camera and do object detection """
 
         # converts from ros_img to cv_img for processing
@@ -145,12 +129,8 @@ class yolov4(object):
             self.publisher(boxes, confs, clss)
 
             if self.save_frames:
-                # call save_camera_data
                 img_filename = f'frame_{frame_counter}'
                 cv2.imwrite(os.path.join(self.log_dir, img_filename))
-
-            # if self.save_lidar:
-                # call save_lidar_data
 
             if self.show_img:
                 cv_img = show_fps(cv_img, fps)
